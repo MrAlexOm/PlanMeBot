@@ -2,3 +2,4 @@ aiogram
 aiohttp
 apscheduler
 pytz
+requests
