@@ -1,0 +1,28 @@
+
+
+Use this token to access the HTTP API:
+8465020533:AAGulNiI2bL_v0xlAAxpqhRfIXVaTsKWP1Y
+Keep your token secure and store it safely, it can be used by anyone to control your bot.
+
+For a description of the Bot API, see this page: https://core.telegram.org/bots/api
+
+Способ 1: Самый быстрый (через адресную строку)
+Открой свою папку PlanMeBOT на рабочем столе как обычную папку.
+
+Кликни мышкой в адресную строку вверху проводника (там, где написан путь C:\Users\AlexOm\...).
+
+Стрими всё, что там написано, введи три буквы cmd и нажми Enter.
+
+У тебя откроется черное окно терминала, которое уже находится в нужной папке.
+
+Пиши python main.py и погнали!
+
+Способ 2: Через команду cd (Change Directory)
+Открой CMD и просто скопируй туда эту команду:
+
+DOS
+cd /d C:\Users\AlexOm\Desktop\PlanMeBOT
+(Флаг /d нужен, чтобы команда сработала, даже если ты вдруг перепрыгиваешь с диска C на диск D). После этого запускай файл.
+
+Способ 3: Для ленивых (через VS Code или PyCharm)
+Если ты открываешь код через редактор (например, VS Code), там внизу есть вкладка Terminal. Он всегда открывается сразу в папке проекта. Просто нажми Ctrl + ~ (тильда), и пиши команду запуска.
