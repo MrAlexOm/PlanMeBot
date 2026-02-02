@@ -15,7 +15,20 @@ import config
 import database as db
 import weather_service
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
+# --- БЛОК ДЛЯ RENDER (АНТИ-СОН) ---
+async def handle(request):
+    return web.Response(text="Bot is alive!")
 
+async def run_web_server():
+    app = web.Application()
+    app.router.add_get("/", handle)
+    app.router.add_get("/healthz", handle)
+    runner = web.AppRunner(app)
+    await runner.setup()
+    port = int(os.getenv("PORT", 10000))
+    site = web.TCPSite(runner, "0.0.0.0", port)
+    await site.start()
+    print(f"Web server started on port {port}")
 # --- БЛОК ДЛЯ RENDER (АНТИ-СОН) ---
 async def handle(request):
     return web.Response(text="Bot is alive!")
@@ -202,6 +215,7 @@ async def set_language(callback: types.CallbackQuery):
     await callback.answer()
 
 async def main():
+    asyncio.create_task(run_web_server())
     db.init_db()
     await set_main_menu(bot)
     scheduler.start()
