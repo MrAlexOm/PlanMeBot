@@ -1,5 +1,3 @@
-aiogram
+pyTelegramBotAPI
+aiosqlite
 aiohttp
-apscheduler
-pytz
-requests
