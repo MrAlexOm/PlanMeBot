@@ -27,7 +27,7 @@ class TaskStates(StatesGroup):
     waiting_for_time = State()
     waiting_for_city = State()
 
-# --- СЛОВАРЬ (RU, EN, IT) ---
+# --- ТЕКСТЫ ---
 MESSAGES = {
     'ru': {
         'start': "Выберите язык:",
@@ -38,8 +38,8 @@ MESSAGES = {
         'ask_time': "Введите время (например, 14:30):",
         'ask_city': "В каком городе проверить погоду для уведомления?",
         'today': "Сегодня", 'tomorrow': "Завтра", 'after': "Послезавтра",
-        'confirm': "✅ Напоминание создано! Пришлю его вместе с погодой и качеством воздуха.",
-        'reminder_text': "🔔 НАПОМИНАНИЕ: {note}\n\n📍 Город: {city}\n🌤 Погода: {temp}°C, {desc}\n💨 Качество воздуха: {aqi}"
+        'confirm': "✅ Напоминание создано! Пришлю его вместе с погодой.",
+        'reminder_text': "🔔 НАПОМИНАНИЕ: {note}\n\n🌤 Погода в {city}: {temp}°C, {desc}\n💨 Воздух: {aqi}"
     },
     'en': {
         'start': "Choose language:",
@@ -50,8 +50,8 @@ MESSAGES = {
         'ask_time': "Enter time (e.g., 14:30):",
         'ask_city': "In which city should I check the weather?",
         'today': "Today", 'tomorrow': "Tomorrow", 'after': "Day after tomorrow",
-        'confirm': "✅ Reminder set! I'll send it with weather and air quality report.",
-        'reminder_text': "🔔 REMINDER: {note}\n\n📍 City: {city}\n🌤 Weather: {temp}°C, {desc}\n💨 Air Quality: {aqi}"
+        'confirm': "✅ Reminder set! I'll send it with the weather report.",
+        'reminder_text': "🔔 REMINDER: {note}\n\n🌤 Weather in {city}: {temp}°C, {desc}\n💨 Air: {aqi}"
     },
     'it': {
         'start': "Scegli la lingua:",
@@ -62,12 +62,12 @@ MESSAGES = {
         'ask_time': "Inserisci l'ora (es. 14:30):",
         'ask_city': "In quale città controllo il meteo?",
         'today': "Oggi", 'tomorrow': "Domani", 'after': "Dopodomani",
-        'confirm': "✅ Promemoria impostato! Lo invierò con il meteo e la qualità dell'aria.",
-        'reminder_text': "🔔 PROMEMORIA: {note}\n\n📍 Città: {city}\n🌤 Meteo: {temp}°C, {desc}\n💨 Qualità dell'aria: {aqi}"
+        'confirm': "✅ Promemoria impostato! Lo invierò con il meteo.",
+        'reminder_text': "🔔 PROMEMORIA: {note}\n\n🌤 Meteo a {city}: {temp}°C, {desc}\n💨 Aria: {aqi}"
     }
 }
 
-# --- ПОГОДА И КАЧЕСТВО ВОЗДУХА ---
+# --- ПОГОДА ---
 async def fetch_weather_data(city, lang):
     url = f"http://api.openweathermap.org/data/2.5/weather?q={city}&appid={WEATHER_API_KEY}&units=metric&lang={lang}"
     async with aiohttp.ClientSession() as session:
@@ -76,7 +76,6 @@ async def fetch_weather_data(city, lang):
             data = await resp.json()
             lat, lon = data['coord']['lat'], data['coord']['lon']
             
-            # Дополнительный запрос на качество воздуха
             air_url = f"http://api.openweathermap.org/data/2.5/air_pollution?lat={lat}&lon={lon}&appid={WEATHER_API_KEY}"
             async with session.get(air_url) as a_resp:
                 air_data = await a_resp.json()
@@ -92,11 +91,9 @@ async def fetch_weather_data(city, lang):
 async def send_scheduled_reminder(chat_id, note, city, lang):
     w = await fetch_weather_data(city, lang)
     if w:
-        text = MESSAGES[lang]['reminder_text'].format(
-            note=note, city=city, temp=w['temp'], desc=w['desc'], aqi=w['aqi']
-        )
+        text = MESSAGES[lang]['reminder_text'].format(note=note, city=city, temp=w['temp'], desc=w['desc'], aqi=w['aqi'])
     else:
-        text = f"🔔 {note}\n(Weather data for {city} unavailable)"
+        text = f"🔔 {note} (Weather data unavailable)"
     await bot.send_message(chat_id, text)
 
 # --- ХЕНДЛЕРЫ ---
@@ -107,18 +104,13 @@ async def cmd_start(message: types.Message):
         [InlineKeyboardButton(text="English 🇺🇸", callback_data="lang_en")],
         [InlineKeyboardButton(text="Italiano 🇮🇹", callback_data="lang_it")]
     ])
-    await message.answer("Choose language / Выберите язык / Scegli la lingua:", reply_markup=kb)
+    await message.answer("Choose language / Выберите язык:", reply_markup=kb)
 
-@dp.callback_query(F.data.startswith("lang_"))
+@dp.callback_query(F.data.startswith("set_lang_") or F.data.startswith("lang_"))
 async def select_lang(callback: types.CallbackQuery, state: FSMContext):
     lang = callback.data.split("_")[-1]
     await state.update_data(lang=lang)
-    
-    # Главное меню с кнопкой Задачи
-    kb = ReplyKeyboardMarkup(
-        keyboard=[[KeyboardButton(text=MESSAGES[lang]['btn_task'])]], 
-        resize_keyboard=True
-    )
+    kb = ReplyKeyboardMarkup(keyboard=[[KeyboardButton(text=MESSAGES[lang]['btn_task'])]], resize_keyboard=True)
     await callback.message.answer(MESSAGES[lang]['main_menu'], reply_markup=kb)
     await callback.answer()
 
@@ -134,12 +126,10 @@ async def get_note(message: types.Message, state: FSMContext):
     await state.update_data(note=message.text)
     data = await state.get_data()
     lang = data['lang']
-    
     kb = ReplyKeyboardMarkup(keyboard=[
         [KeyboardButton(text=MESSAGES[lang]['today']), KeyboardButton(text=MESSAGES[lang]['tomorrow'])],
         [KeyboardButton(text=MESSAGES[lang]['after'])]
     ], resize_keyboard=True)
-    
     await state.set_state(TaskStates.waiting_for_date)
     await message.answer(MESSAGES[lang]['ask_date'], reply_markup=kb)
 
@@ -163,41 +153,33 @@ async def get_city_and_finish(message: types.Message, state: FSMContext):
     data = await state.get_data()
     lang = data['lang']
     
-    # Для теста: напоминание через 1 минуту. 
-    # В будущем здесь будет логика парсинга data['date_text'] и data['time_text']
-    remind_at = datetime.now() + timedelta(minutes=1)
+    # Расчет времени (упрощенно: напоминание через 1 минуту для теста)
+    # Здесь можно добавить парсинг даты и времени из data['date_text'] и data['time_text']
+    remind_at = datetime.now() + timedelta(minutes=1) 
     
     scheduler.add_job(
-        send_scheduled_reminder,
-        'date',
-        run_date=remind_at,
+        send_scheduled_reminder, 
+        'date', 
+        run_date=remind_at, 
         args=[message.chat.id, data['note'], city, lang]
     )
     
     await message.answer(MESSAGES[lang]['confirm'])
     await state.clear()
 
-# --- RENDER SERVER (Health Check) ---
-async def handle(request): 
-    return web.Response(text="PlanMe Bot is Live and Healthy")
-
+# --- SERVER ---
+async def handle(request): return web.Response(text="PlanMe Live")
 async def start_web_server():
     app = web.Application()
     app.router.add_get("/", handle)
     runner = web.AppRunner(app)
     await runner.setup()
-    port = int(os.getenv("PORT", 10000))
-    await web.TCPSite(runner, "0.0.0.0", port).start()
+    await web.TCPSite(runner, "0.0.0.0", int(os.getenv("PORT", 10000))).start()
 
-# --- ЗАПУСК ---
 async def main():
     asyncio.create_task(start_web_server())
     scheduler.start()
     await dp.start_polling(bot)
 
 if __name__ == "__main__":
-    logging.basicConfig(level=logging.INFO)
-    try:
-        asyncio.run(main())
-    except (KeyboardInterrupt, SystemExit):
-        logging.info("Bot stopped")
+    asyncio.run(main())
