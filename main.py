@@ -75,6 +75,7 @@ async def fetch_weather_data(city, lang):
             if resp.status != 200: return None
             data = await resp.json()
             lat, lon = data['coord']['lat'], data['coord']['lon']
+            tz_offset = data.get('timezone', 0)
             
             # Дополнительный запрос на качество воздуха
             air_url = f"http://api.openweathermap.org/data/2.5/air_pollution?lat={lat}&lon={lon}&appid={WEATHER_API_KEY}"
@@ -86,7 +87,8 @@ async def fetch_weather_data(city, lang):
             return {
                 'temp': data['main']['temp'],
                 'desc': data['weather'][0]['description'],
-                'aqi': aqi_map.get(aqi_val, "N/A")
+                'aqi': aqi_map.get(aqi_val, "N/A"),
+                'tz_offset': tz_offset
             }
 
 async def send_scheduled_reminder(chat_id, note, city, lang):
@@ -162,18 +164,88 @@ async def get_city_and_finish(message: types.Message, state: FSMContext):
     city = message.text
     data = await state.get_data()
     lang = data['lang']
-    
-    # Для теста: напоминание через 1 минуту. 
-    # В будущем здесь будет логика парсинга data['date_text'] и data['time_text']
-    remind_at = datetime.now() + timedelta(minutes=1)
-    
+
+    # Извлекаем выбранные дату и время
+    date_text = data.get('date_text')
+    time_text = data.get('time_text')
+
+    # Загружаем данные по погоде, чтобы получить tz_offset города
+    weather = await fetch_weather_data(city, lang)
+    if not weather:
+        # Локализованные сообщения об ошибке города
+        error_texts = {
+            'ru': "Не удалось найти такой город. Проверьте название и попробуйте снова.",
+            'en': "Could not find this city. Please check the name and try again.",
+            'it': "Impossibile trovare questa città. Controlla il nome e riprova."
+        }
+        await message.answer(error_texts.get(lang, error_texts['en']))
+        return
+
+    tz_offset = int(weather.get('tz_offset', 0))  # seconds
+
+    # Текущее время в выбранном городе: UTC now + tz_offset
+    utc_now = datetime.utcnow()
+    local_now = utc_now + timedelta(seconds=tz_offset)
+
+    # Нормализуем ключевые слова по языкам
+    today_aliases = {MESSAGES['ru']['today'], MESSAGES['en']['today'], MESSAGES['it']['today'], 'Сегодня', 'Today', 'Oggi'}
+    tomorrow_aliases = {MESSAGES['ru']['tomorrow'], MESSAGES['en']['tomorrow'], MESSAGES['it']['tomorrow'], 'Завтра', 'Tomorrow', 'Domani'}
+    after_aliases = {MESSAGES['ru']['after'], MESSAGES['en']['after'], MESSAGES['it']['after'], 'Послезавтра', 'Day after tomorrow', 'Dopodomani', 'Day after'}
+
+    # Определяем локальную дату пользователя
+    base_date = local_now.date()
+    if date_text in today_aliases:
+        target_date = base_date
+    elif date_text in tomorrow_aliases:
+        target_date = base_date + timedelta(days=1)
+    elif date_text in after_aliases:
+        target_date = base_date + timedelta(days=2)
+    else:
+        invalid_date_texts = {
+            'ru': "Некорректная дата. Пожалуйста, выберите одну из предложенных кнопок.",
+            'en': "Invalid date. Please choose one of the suggested options.",
+            'it': "Data non valida. Scegli una delle opzioni proposte."
+        }
+        await message.answer(invalid_date_texts.get(lang, invalid_date_texts['en']))
+        return
+
+    # Парсим время HH:MM
+    try:
+        hour_min = time_text.strip()
+        parts = hour_min.split(":")
+        if len(parts) != 2:
+            raise ValueError("Time must be HH:MM")
+        hour = int(parts[0])
+        minute = int(parts[1])
+        if not (0 <= hour <= 23 and 0 <= minute <= 59):
+            raise ValueError("Time out of range")
+    except Exception:
+        invalid_time_texts = {
+            'ru': "Некорректный формат времени. Введите в формате ЧЧ:ММ, например, 14:30.",
+            'en': "Invalid time format. Use HH:MM, e.g., 14:30.",
+            'it': "Formato orario non valido. Usa HH:MM, ad es., 14:30."
+        }
+        await message.answer(invalid_time_texts.get(lang, invalid_time_texts['en']))
+        return
+
+    # Собираем локальное datetime в выбранном городе
+    local_target = datetime(year=target_date.year, month=target_date.month, day=target_date.day, hour=hour, minute=minute)
+
+    # Если локальное время уже прошло — переносим на следующий день
+    if local_target <= local_now:
+        local_target = local_target + timedelta(days=1)
+
+    # Конверт��руем локальное время в UTC для планировщика: local - tz_offset
+    remind_at_utc = local_target - timedelta(seconds=tz_offset)
+
+    # Планируем задачу в UTC
     scheduler.add_job(
         send_scheduled_reminder,
         'date',
-        run_date=remind_at,
+        run_date=remind_at_utc,
         args=[message.chat.id, data['note'], city, lang]
     )
-    
+
     await message.answer(MESSAGES[lang]['confirm'])
     await state.clear()
 
@@ -191,9 +263,20 @@ async def start_web_server():
 
 # --- ЗАПУСК ---
 async def main():
+    # Start the health-check web server before entering the polling loop
     asyncio.create_task(start_web_server())
     scheduler.start()
-    await dp.start_polling(bot)
+
+    # Survival loop for polling to auto-recover from transient failures
+    while True:
+        try:
+            await dp.start_polling(bot)
+        except Exception as e:
+            logging.error(f"Polling error: {e}")
+            await asyncio.sleep(5)
+            continue
+        # If polling exits cleanly, break to avoid tight loop
+        break
 
 if __name__ == "__main__":
     logging.basicConfig(level=logging.INFO)
