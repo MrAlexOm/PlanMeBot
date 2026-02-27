@@ -7,7 +7,7 @@ def setup_logging():
     
     # Создаем форматер с временем и уровнем
     formatter = logging.Formatter(
-        fmt='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+        fmt='%(asctime)s - %(name)s - %(levelname)s - [%(funcName)s:%(lineno)d] - %(message)s',
         datefmt='%Y-%m-%d %H:%M:%S'
     )
     
@@ -24,7 +24,7 @@ def setup_logging():
     console_handler.setFormatter(formatter)
     logger.addHandler(console_handler)
     
-    # Файловый обработчик (опционально)
+    # Файловый обработчик для основных логов
     try:
         file_handler = logging.FileHandler(
             f'planme_bot_{datetime.now().strftime("%Y%m%d")}.log',
@@ -40,6 +40,18 @@ def setup_logging():
     logging.getLogger('aiogram').setLevel(logging.WARNING)
     logging.getLogger('apscheduler').setLevel(logging.WARNING)
     logging.getLogger('sqlalchemy').setLevel(logging.WARNING)
+    logging.getLogger('sqlalchemy.engine').setLevel(logging.WARNING)
+    
+    # Включаем детальное логирование для HTTP запросов
+    logging.getLogger('aiohttp').setLevel(logging.DEBUG)
     
     logger.info("Logging system initialized")
+    
+    # Импортируем и настраиваем API логгеры
+    try:
+        from api_logger import api_logger, bot_logger
+        logger.info("API loggers initialized")
+    except ImportError as e:
+        logger.warning(f"Could not import API loggers: {e}")
+    
     return logger

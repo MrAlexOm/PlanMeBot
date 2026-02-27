@@ -2,6 +2,7 @@ import os
 import asyncio
 import logging
 import aiohttp
+import time
 from datetime import datetime, timedelta
 from aiogram import Bot, Dispatcher, types, F
 from aiogram.filters import Command
@@ -20,6 +21,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from messages import MESSAGES, LANGUAGE_NAMES
 from logger_config import setup_logging
 from database_middleware import create_database_middleware
+from api_logger import api_logger, bot_logger, log_execution_time
 
 # --- НАСТРОЙКИ ---
 API_TOKEN = os.environ.get("BOT_TOKEN")
@@ -44,38 +46,91 @@ class TaskStates(StatesGroup):
 
 
 # --- ПОГОДА И КАЧЕСТВО ВОЗДУХА ---
+@log_execution_time(logging.getLogger("weather"))
 async def fetch_weather_data(city, lang):
     url = f"http://api.openweathermap.org/data/2.5/weather?q={city}&appid={WEATHER_API_KEY}&units=metric&lang={lang}"
-    async with aiohttp.ClientSession() as session:
-        async with session.get(url) as resp:
-            if resp.status != 200: return None
-            data = await resp.json()
-            lat, lon = data['coord']['lat'], data['coord']['lon']
-            tz_offset = data.get('timezone', 0)
-            
-            # Дополнительный запрос на качество воздуха
-            air_url = f"http://api.openweathermap.org/data/2.5/air_pollution?lat={lat}&lon={lon}&appid={WEATHER_API_KEY}"
-            async with session.get(air_url) as a_resp:
-                air_data = await a_resp.json()
-                aqi_val = air_data['list'][0]['main']['aqi']
-                aqi_map = {1: "Excellent", 2: "Good", 3: "Fair", 4: "Poor", 5: "Very Poor"}
-            
-            return {
-                'temp': data['main']['temp'],
-                'desc': data['weather'][0]['description'],
-                'aqi': aqi_map.get(aqi_val, "N/A"),
-                'tz_offset': tz_offset
-            }
+    
+    # Логирование запроса
+    api_logger.log_request(
+        method="GET",
+        url=url,
+        params={"city": city, "units": "metric", "lang": lang}
+    )
+    
+    start_time = time.time()
+    
+    try:
+        async with aiohttp.ClientSession() as session:
+            async with session.get(url) as resp:
+                response_time = time.time() - start_time
+                
+                if resp.status != 200: 
+                    api_logger.log_response(resp.status, response_time=response_time, url=url)
+                    return None
+                
+                data = await resp.json()
+                api_logger.log_response(resp.status, data, response_time, url)
+                
+                lat, lon = data['coord']['lat'], data['coord']['lon']
+                tz_offset = data.get('timezone', 0)
+                
+                # Дополнительный запрос на качество воздуха
+                air_url = f"http://api.openweathermap.org/data/2.5/air_pollution?lat={lat}&lon={lon}&appid={WEATHER_API_KEY}"
+                
+                api_logger.log_request(
+                    method="GET",
+                    url=air_url,
+                    params={"lat": lat, "lon": lon}
+                )
+                
+                air_start_time = time.time()
+                
+                async with session.get(air_url) as a_resp:
+                    air_response_time = time.time() - air_start_time
+                    
+                    if a_resp.status != 200:
+                        api_logger.log_response(a_resp.status, response_time=air_response_time, url=air_url)
+                        # Продолжаем даже без данных о качестве воздуха
+                        aqi_val = 1
+                    else:
+                        air_data = await a_resp.json()
+                        api_logger.log_response(a_resp.status, air_data, air_response_time, air_url)
+                        aqi_val = air_data['list'][0]['main']['aqi']
+                    
+                    aqi_map = {1: "Excellent", 2: "Good", 3: "Fair", 4: "Poor", 5: "Very Poor"}
+                
+                return {
+                    'temp': data['main']['temp'],
+                    'desc': data['weather'][0]['description'],
+                    'aqi': aqi_map.get(aqi_val, "N/A"),
+                    'tz_offset': tz_offset
+                }
+                
+    except Exception as e:
+        response_time = time.time() - start_time
+        api_logger.log_error(e, f"Weather API request failed for city: {city}")
+        return None
 
 async def send_scheduled_reminder(chat_id, note, city, lang):
-    w = await fetch_weather_data(city, lang)
-    if w:
-        text = MESSAGES[lang]['reminder_text'].format(
-            note=note, city=city, temp=w['temp'], desc=w['desc'], aqi=w['aqi']
-        )
-    else:
-        text = f"🔔 {note}\n(Weather data for {city} unavailable)"
-    await bot.send_message(chat_id, text)
+    """Отправка запланированного напоминания с логированием"""
+    try:
+        w = await fetch_weather_data(city, lang)
+        if w:
+            text = MESSAGES[lang]['reminder_text'].format(
+                note=note, city=city, temp=w['temp'], desc=w['desc'], aqi=w['aqi']
+            )
+        else:
+            text = f"🔔 {note}\n(Weather data for {city} unavailable)"
+        
+        await bot.send_message(chat_id, text)
+        
+        # Логируем успешную отправку
+        bot_logger.log_reminder_sent(chat_id, 0, True)  # reminder_id=0 для scheduled
+        
+    except Exception as e:
+        # Логируем ошибку отправки
+        logger.error(f"Failed to send reminder to {chat_id}: {e}")
+        bot_logger.log_reminder_sent(chat_id, 0, False)
 
 # --- ХЕНДЛЕРЫ ---
 @dp.message(Command("start"))
@@ -90,10 +145,19 @@ async def cmd_start(message: types.Message):
 @dp.callback_query(F.data.startswith("lang_"))
 async def select_lang(callback: types.CallbackQuery, state: FSMContext, session: AsyncSession):
     lang = callback.data.split("_")[-1]
+    user_id = callback.from_user.id
+    
+    # Получаем текущий язык для логирования
+    old_user = await UserRepository.get_by_id(session, user_id)
+    old_lang = old_user.lang if old_user else 'en'
+    
     await state.update_data(lang=lang)
     
     # Сохраняем язык в БД через репозиторий
-    await UserRepository.set_lang(session, callback.from_user.id, lang)
+    await UserRepository.set_lang(session, user_id, lang)
+    
+    # Логируем смену языка
+    bot_logger.log_language_change(user_id, old_lang, lang)
     
     # Главное меню с кнопкой Задачи
     kb = ReplyKeyboardMarkup(
@@ -212,6 +276,14 @@ async def get_city_and_finish(message: types.Message, state: FSMContext, session
         task_text=data['note'],
         remind_at=remind_at_utc,
         city=city
+    )
+    
+    # Логируем создание напоминания
+    bot_logger.log_reminder_created(
+        user_id=message.from_user.id,
+        reminder_id=reminder.id,
+        task_text=data['note'],
+        remind_at=remind_at_utc.isoformat()
     )
 
     # Планируем задачу в UTC
