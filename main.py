@@ -12,9 +12,19 @@ from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton, ReplyKeybo
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from aiohttp import web
 
+# Импорты для работы с БД
+from database import init_db, get_user_lang, set_user_lang, get_or_create_user, create_reminder
+from models import User, Reminder
+# Импорты для сообщений и логирования
+from messages import MESSAGES, LANGUAGE_NAMES
+from logger_config import setup_logging
+
 # --- НАСТРОЙКИ ---
 API_TOKEN = os.environ.get("BOT_TOKEN")
 WEATHER_API_KEY = os.environ.get("WEATHER_API_KEY")
+
+# Настройка логирования
+logger = setup_logging()
 
 bot = Bot(token=API_TOKEN)
 dp = Dispatcher(storage=MemoryStorage())
@@ -27,45 +37,6 @@ class TaskStates(StatesGroup):
     waiting_for_time = State()
     waiting_for_city = State()
 
-# --- СЛОВАРЬ (RU, EN, IT) ---
-MESSAGES = {
-    'ru': {
-        'start': "Выберите язык:",
-        'main_menu': "Вы выбрали русский язык. Что делаем?",
-        'btn_task': "📅 Задачи",
-        'ask_note': "Введите текст вашей заметки:",
-        'ask_date': "Когда напомнить?",
-        'ask_time': "Введите время (например, 14:30):",
-        'ask_city': "В каком городе проверить погоду для уведомления?",
-        'today': "Сегодня", 'tomorrow': "Завтра", 'after': "Послезавтра",
-        'confirm': "✅ Напоминание создано! Пришлю его вместе с погодой и качеством воздуха.",
-        'reminder_text': "🔔 НАПОМИНАНИЕ: {note}\n\n📍 Город: {city}\n🌤 Погода: {temp}°C, {desc}\n💨 Качество воздуха: {aqi}"
-    },
-    'en': {
-        'start': "Choose language:",
-        'main_menu': "English selected. What's next?",
-        'btn_task': "📅 Tasks",
-        'ask_note': "Enter your note text:",
-        'ask_date': "When to remind?",
-        'ask_time': "Enter time (e.g., 14:30):",
-        'ask_city': "In which city should I check the weather?",
-        'today': "Today", 'tomorrow': "Tomorrow", 'after': "Day after tomorrow",
-        'confirm': "✅ Reminder set! I'll send it with weather and air quality report.",
-        'reminder_text': "🔔 REMINDER: {note}\n\n📍 City: {city}\n🌤 Weather: {temp}°C, {desc}\n💨 Air Quality: {aqi}"
-    },
-    'it': {
-        'start': "Scegli la lingua:",
-        'main_menu': "Lingua italiana selezionata. Cosa facciamo?",
-        'btn_task': "📅 Compiti",
-        'ask_note': "Inserisci il testo della tua nota:",
-        'ask_date': "Quando ti ricordo?",
-        'ask_time': "Inserisci l'ora (es. 14:30):",
-        'ask_city': "In quale città controllo il meteo?",
-        'today': "Oggi", 'tomorrow': "Domani", 'after': "Dopodomani",
-        'confirm': "✅ Promemoria impostato! Lo invierò con il meteo e la qualità dell'aria.",
-        'reminder_text': "🔔 PROMEMORIA: {note}\n\n📍 Città: {city}\n🌤 Meteo: {temp}°C, {desc}\n💨 Qualità dell'aria: {aqi}"
-    }
-}
 
 # --- ПОГОДА И КАЧЕСТВО ВОЗДУХА ---
 async def fetch_weather_data(city, lang):
@@ -116,6 +87,9 @@ async def select_lang(callback: types.CallbackQuery, state: FSMContext):
     lang = callback.data.split("_")[-1]
     await state.update_data(lang=lang)
     
+    # Сохраняем язык в БД
+    await set_user_lang(callback.from_user.id, lang)
+    
     # Главное меню с кнопкой Задачи
     kb = ReplyKeyboardMarkup(
         keyboard=[[KeyboardButton(text=MESSAGES[lang]['btn_task'])]], 
@@ -126,8 +100,11 @@ async def select_lang(callback: types.CallbackQuery, state: FSMContext):
 
 @dp.message(F.text.in_({"📅 Задачи", "📅 Tasks", "📅 Compiti"}))
 async def start_task_creation(message: types.Message, state: FSMContext):
-    data = await state.get_data()
-    lang = data.get('lang', 'ru')
+    # Получаем или создаем пользователя
+    user = await get_or_create_user(message.from_user.id)
+    lang = user.lang
+    
+    await state.update_data(lang=lang)
     await state.set_state(TaskStates.waiting_for_note)
     await message.answer(MESSAGES[lang]['ask_note'], reply_markup=types.ReplyKeyboardRemove())
 
@@ -173,12 +150,7 @@ async def get_city_and_finish(message: types.Message, state: FSMContext):
     weather = await fetch_weather_data(city, lang)
     if not weather:
         # Локализованные сообщения об ошибке города
-        error_texts = {
-            'ru': "Не удалось найти такой город. Проверьте название и попробуйте снова.",
-            'en': "Could not find this city. Please check the name and try again.",
-            'it': "Impossibile trovare questa città. Controlla il nome e riprova."
-        }
-        await message.answer(error_texts.get(lang, error_texts['en']))
+        await message.answer(MESSAGES[lang]['error_city'])
         return
 
     tz_offset = int(weather.get('tz_offset', 0))  # seconds
@@ -201,12 +173,7 @@ async def get_city_and_finish(message: types.Message, state: FSMContext):
     elif date_text in after_aliases:
         target_date = base_date + timedelta(days=2)
     else:
-        invalid_date_texts = {
-            'ru': "Некорректная дата. Пожалуйста, выберите одну из предложенных кнопок.",
-            'en': "Invalid date. Please choose one of the suggested options.",
-            'it': "Data non valida. Scegli una delle opzioni proposte."
-        }
-        await message.answer(invalid_date_texts.get(lang, invalid_date_texts['en']))
+        await message.answer(MESSAGES[lang]['error_date'])
         return
 
     # Парсим время HH:MM
@@ -220,12 +187,7 @@ async def get_city_and_finish(message: types.Message, state: FSMContext):
         if not (0 <= hour <= 23 and 0 <= minute <= 59):
             raise ValueError("Time out of range")
     except Exception:
-        invalid_time_texts = {
-            'ru': "Некорректный формат времени. Введите в формате ЧЧ:ММ, например, 14:30.",
-            'en': "Invalid time format. Use HH:MM, e.g., 14:30.",
-            'it': "Formato orario non valido. Usa HH:MM, ad es., 14:30."
-        }
-        await message.answer(invalid_time_texts.get(lang, invalid_time_texts['en']))
+        await message.answer(MESSAGES[lang]['error_time'])
         return
 
     # Собираем локальное datetime в выбранном городе
@@ -237,6 +199,14 @@ async def get_city_and_finish(message: types.Message, state: FSMContext):
 
     # Конверт��руем локальное время в UTC для планировщика: local - tz_offset
     remind_at_utc = local_target - timedelta(seconds=tz_offset)
+
+    # Создаем напоминание в БД
+    reminder = await create_reminder(
+        user_id=message.from_user.id,
+        task_text=data['note'],
+        remind_at=remind_at_utc,
+        city=city
+    )
 
     # Планируем задачу в UTC
     scheduler.add_job(
@@ -263,24 +233,28 @@ async def start_web_server():
 
 # --- ЗАПУСК ---
 async def main():
+    # Инициализация БД
+    await init_db()
+    logger.info("Database initialized")
+    
     # Start the health-check web server before entering the polling loop
     asyncio.create_task(start_web_server())
     scheduler.start()
+    logger.info("Bot started successfully")
 
     # Survival loop for polling to auto-recover from transient failures
     while True:
         try:
             await dp.start_polling(bot)
         except Exception as e:
-            logging.error(f"Polling error: {e}")
+            logger.error(f"Polling error: {e}")
             await asyncio.sleep(5)
             continue
         # If polling exits cleanly, break to avoid tight loop
         break
 
 if __name__ == "__main__":
-    logging.basicConfig(level=logging.INFO)
     try:
         asyncio.run(main())
     except (KeyboardInterrupt, SystemExit):
-        logging.info("Bot stopped")
+        logger.info("Bot stopped")
