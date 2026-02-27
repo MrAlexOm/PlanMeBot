@@ -28,9 +28,15 @@ from database_middleware import create_database_middleware
 from api_logger import api_logger, bot_logger, log_execution_time
 
 # --- НАСТРОЙКИ ---
-# Приоритет: переменные окружения (.env) → config.py
-API_TOKEN = os.getenv("BOT_TOKEN") or "8465020533:AAGulNiI2bL_v0xlAAxpqhRfIXVaTsKWP1Y"
-WEATHER_API_KEY = os.getenv("WEATHER_API_KEY") or "35e352d2f970db63c4d5d7fe630e869c"
+# Загрузка токенов из .env файла (НИКОГДА не храните токены в коде!)
+API_TOKEN = os.getenv("BOT_TOKEN")
+WEATHER_API_KEY = os.getenv("WEATHER_API_KEY")
+
+# Проверка наличия токенов
+if not API_TOKEN:
+    raise ValueError("BOT_TOKEN не найден! Создайте .env файл с вашим токеном.")
+if not WEATHER_API_KEY:
+    raise ValueError("WEATHER_API_KEY не найден! Создайте .env файл с вашим API ключом.")
 
 # Настройка логирования
 logger = setup_logging()
