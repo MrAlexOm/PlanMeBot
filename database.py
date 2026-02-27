@@ -31,39 +31,43 @@ async def init_db():
         await conn.run_sync(Base.metadata.create_all)
     logger.info("Database initialized successfully")
 
-async def get_session() -> AsyncSession:
-    """Получение сессии БД"""
-    async with AsyncSessionLocal() as session:
-        try:
-            yield session
-        finally:
-            await session.close()
+# --- Классы для работы с сессиями ---
 
-# --- Работа с пользователями ---
-
-async def get_user_lang(user_id: int) -> str:
-    """Получение языка пользователя"""
-    async with AsyncSessionLocal() as session:
-        result = await session.execute(
-            select(User.lang).where(User.id == user_id)
-        )
-        lang = result.scalar_one_or_none()
-        return lang if lang else 'en'
-
-async def set_user_lang(user_id: int, lang: str) -> None:
-    """Установка языка пользователя"""
-    async with AsyncSessionLocal() as session:
-        await session.merge(User(id=user_id, lang=lang))
-        await session.commit()
-        logger.info(f"User {user_id} language set to {lang}")
-
-async def get_or_create_user(user_id: int, lang: str = 'en') -> User:
-    """Получение или создание пользователя"""
-    async with AsyncSessionLocal() as session:
+class UserRepository:
+    """Репозиторий для работы с пользователями"""
+    
+    @staticmethod
+    async def get_by_id(session: AsyncSession, user_id: int) -> Optional[User]:
+        """Получение пользователя по ID"""
         result = await session.execute(
             select(User).where(User.id == user_id)
         )
-        user = result.scalar_one_or_none()
+        return result.scalar_one_or_none()
+    
+    @staticmethod
+    async def get_lang(session: AsyncSession, user_id: int) -> str:
+        """Получение языка пользователя"""
+        user = await UserRepository.get_by_id(session, user_id)
+        return user.lang if user else 'en'
+    
+    @staticmethod
+    async def set_lang(session: AsyncSession, user_id: int, lang: str) -> User:
+        """Установка языка пользователя"""
+        user = await UserRepository.get_by_id(session, user_id)
+        if user:
+            user.lang = lang
+        else:
+            user = User(id=user_id, lang=lang)
+            session.add(user)
+        
+        await session.commit()
+        logger.info(f"User {user_id} language set to {lang}")
+        return user
+    
+    @staticmethod
+    async def get_or_create(session: AsyncSession, user_id: int, lang: str = 'en') -> User:
+        """Получение или создание пользователя"""
+        user = await UserRepository.get_by_id(session, user_id)
         
         if not user:
             user = User(id=user_id, lang=lang)
@@ -74,16 +78,18 @@ async def get_or_create_user(user_id: int, lang: str = 'en') -> User:
         
         return user
 
-# --- Работа с напоминаниями ---
-
-async def create_reminder(
-    user_id: int, 
-    task_text: str, 
-    remind_at: datetime, 
-    city: Optional[str] = None
-) -> Reminder:
-    """Создание нового напоминания"""
-    async with AsyncSessionLocal() as session:
+class ReminderRepository:
+    """Репозиторий для работы с напоминаниями"""
+    
+    @staticmethod
+    async def create(
+        session: AsyncSession,
+        user_id: int, 
+        task_text: str, 
+        remind_at: datetime, 
+        city: Optional[str] = None
+    ) -> Reminder:
+        """Создание нового напоминания"""
         reminder = Reminder(
             user_id=user_id,
             task_text=task_text,
@@ -95,10 +101,14 @@ async def create_reminder(
         await session.refresh(reminder)
         logger.info(f"Created reminder {reminder.id} for user {user_id}")
         return reminder
-
-async def get_user_reminders(user_id: int, active_only: bool = True) -> List[Reminder]:
-    """Получение всех напоминаний пользователя"""
-    async with AsyncSessionLocal() as session:
+    
+    @staticmethod
+    async def get_user_reminders(
+        session: AsyncSession, 
+        user_id: int, 
+        active_only: bool = True
+    ) -> List[Reminder]:
+        """Получение всех напоминаний пользователя"""
         query = select(Reminder).where(Reminder.user_id == user_id)
         
         if active_only:
@@ -108,10 +118,13 @@ async def get_user_reminders(user_id: int, active_only: bool = True) -> List[Rem
         
         result = await session.execute(query)
         return result.scalars().all()
-
-async def get_pending_reminders(before_time: datetime) -> List[Reminder]:
-    """Получение напоминаний, которые нужно отправить"""
-    async with AsyncSessionLocal() as session:
+    
+    @staticmethod
+    async def get_pending_reminders(
+        session: AsyncSession, 
+        before_time: datetime
+    ) -> List[Reminder]:
+        """Получение напоминаний, которые нужно отправить"""
         result = await session.execute(
             select(Reminder)
             .where(
@@ -121,10 +134,10 @@ async def get_pending_reminders(before_time: datetime) -> List[Reminder]:
             .order_by(Reminder.remind_at)
         )
         return result.scalars().all()
-
-async def mark_reminder_completed(reminder_id: int) -> bool:
-    """Отметить напоминание как выполненное"""
-    async with AsyncSessionLocal() as session:
+    
+    @staticmethod
+    async def mark_completed(session: AsyncSession, reminder_id: int) -> bool:
+        """Отметить напоминание как выполненное"""
         result = await session.execute(
             update(Reminder)
             .where(Reminder.id == reminder_id)
@@ -135,10 +148,10 @@ async def mark_reminder_completed(reminder_id: int) -> bool:
         if success:
             logger.info(f"Marked reminder {reminder_id} as completed")
         return success
-
-async def delete_reminder(reminder_id: int, user_id: int) -> bool:
-    """Удаление напоминания"""
-    async with AsyncSessionLocal() as session:
+    
+    @staticmethod
+    async def delete(session: AsyncSession, reminder_id: int, user_id: int) -> bool:
+        """Удаление напоминания"""
         result = await session.execute(
             delete(Reminder)
             .where(Reminder.id == reminder_id, Reminder.user_id == user_id)
@@ -148,6 +161,35 @@ async def delete_reminder(reminder_id: int, user_id: int) -> bool:
         if success:
             logger.info(f"Deleted reminder {reminder_id} for user {user_id}")
         return success
+
+# --- Обратная совместимость ---
+
+async def get_user_lang(user_id: int) -> str:
+    """Обратная совместимая функция получения языка пользователя"""
+    async with AsyncSessionLocal() as session:
+        return await UserRepository.get_lang(session, user_id)
+
+async def set_user_lang(user_id: int, lang: str) -> None:
+    """Обратная совместимая функция установки языка пользователя"""
+    async with AsyncSessionLocal() as session:
+        await UserRepository.set_lang(session, user_id, lang)
+
+async def get_or_create_user(user_id: int, lang: str = 'en') -> User:
+    """Обратная совместимая функция получения/создания пользователя"""
+    async with AsyncSessionLocal() as session:
+        return await UserRepository.get_or_create(session, user_id, lang)
+
+async def create_reminder(
+    user_id: int, 
+    task_text: str, 
+    remind_at: datetime, 
+    city: Optional[str] = None
+) -> Reminder:
+    """Обратная совместимая функция создания напоминания"""
+    async with AsyncSessionLocal() as session:
+        return await ReminderRepository.create(
+            session, user_id, task_text, remind_at, city
+        )
 
 # --- Вспомогательные функции ---
 

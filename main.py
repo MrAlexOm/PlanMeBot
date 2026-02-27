@@ -13,11 +13,13 @@ from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from aiohttp import web
 
 # Импорты для работы с БД
-from database import init_db, get_user_lang, set_user_lang, get_or_create_user, create_reminder
+from database import init_db, UserRepository, ReminderRepository
 from models import User, Reminder
-# Импорты для сообщений и логирования
+from sqlalchemy.ext.asyncio import AsyncSession
+# Импорты для сообщений, логирования и middleware
 from messages import MESSAGES, LANGUAGE_NAMES
 from logger_config import setup_logging
+from database_middleware import create_database_middleware
 
 # --- НАСТРОЙКИ ---
 API_TOKEN = os.environ.get("BOT_TOKEN")
@@ -29,6 +31,9 @@ logger = setup_logging()
 bot = Bot(token=API_TOKEN)
 dp = Dispatcher(storage=MemoryStorage())
 scheduler = AsyncIOScheduler()
+
+# Регистрация middleware для БД
+dp.update.middleware(create_database_middleware())
 
 # --- СОСТОЯНИЯ (FSM) ---
 class TaskStates(StatesGroup):
@@ -83,12 +88,12 @@ async def cmd_start(message: types.Message):
     await message.answer("Choose language / Выберите язык / Scegli la lingua:", reply_markup=kb)
 
 @dp.callback_query(F.data.startswith("lang_"))
-async def select_lang(callback: types.CallbackQuery, state: FSMContext):
+async def select_lang(callback: types.CallbackQuery, state: FSMContext, session: AsyncSession):
     lang = callback.data.split("_")[-1]
     await state.update_data(lang=lang)
     
-    # Сохраняем язык в БД
-    await set_user_lang(callback.from_user.id, lang)
+    # Сохраняем язык в БД через репозиторий
+    await UserRepository.set_lang(session, callback.from_user.id, lang)
     
     # Главное меню с кнопкой Задачи
     kb = ReplyKeyboardMarkup(
@@ -99,9 +104,9 @@ async def select_lang(callback: types.CallbackQuery, state: FSMContext):
     await callback.answer()
 
 @dp.message(F.text.in_({"📅 Задачи", "📅 Tasks", "📅 Compiti"}))
-async def start_task_creation(message: types.Message, state: FSMContext):
-    # Получаем или создаем пользователя
-    user = await get_or_create_user(message.from_user.id)
+async def start_task_creation(message: types.Message, state: FSMContext, session: AsyncSession):
+    # Получаем или создаем пользователя через репозиторий
+    user = await UserRepository.get_or_create(session, message.from_user.id)
     lang = user.lang
     
     await state.update_data(lang=lang)
@@ -137,7 +142,7 @@ async def get_time(message: types.Message, state: FSMContext):
     await message.answer(MESSAGES[data['lang']]['ask_city'])
 
 @dp.message(TaskStates.waiting_for_city)
-async def get_city_and_finish(message: types.Message, state: FSMContext):
+async def get_city_and_finish(message: types.Message, state: FSMContext, session: AsyncSession):
     city = message.text
     data = await state.get_data()
     lang = data['lang']
@@ -200,8 +205,9 @@ async def get_city_and_finish(message: types.Message, state: FSMContext):
     # Конверт��руем локальное время в UTC для планировщика: local - tz_offset
     remind_at_utc = local_target - timedelta(seconds=tz_offset)
 
-    # Создаем напоминание в БД
-    reminder = await create_reminder(
+    # Создаем напоминание в БД через репозиторий
+    reminder = await ReminderRepository.create(
+        session,
         user_id=message.from_user.id,
         task_text=data['note'],
         remind_at=remind_at_utc,
