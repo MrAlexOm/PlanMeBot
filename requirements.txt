@@ -4,3 +4,4 @@ aiohttp
 apscheduler
 sqlalchemy[asyncio]
 alembic
+python-dotenv

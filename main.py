@@ -13,6 +13,10 @@ from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton, ReplyKeybo
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from aiohttp import web
 
+# Загрузка переменных окружения из .env файла
+from dotenv import load_dotenv
+load_dotenv()
+
 # Импорты для работы с БД
 from database import init_db, UserRepository, ReminderRepository
 from models import User, Reminder
@@ -24,8 +28,9 @@ from database_middleware import create_database_middleware
 from api_logger import api_logger, bot_logger, log_execution_time
 
 # --- НАСТРОЙКИ ---
-API_TOKEN = os.environ.get("BOT_TOKEN")
-WEATHER_API_KEY = os.environ.get("WEATHER_API_KEY")
+# Приоритет: переменные окружения (.env) → config.py
+API_TOKEN = os.getenv("BOT_TOKEN") or "8465020533:AAGulNiI2bL_v0xlAAxpqhRfIXVaTsKWP1Y"
+WEATHER_API_KEY = os.getenv("WEATHER_API_KEY") or "35e352d2f970db63c4d5d7fe630e869c"
 
 # Настройка логирования
 logger = setup_logging()
