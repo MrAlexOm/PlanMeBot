@@ -3,7 +3,7 @@ import logging
 from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession, async_sessionmaker
 from sqlalchemy import select, func, insert, update, delete
 from models import User, Reminder, Base
-from datetime import datetime
+from datetime import date, datetime
 from typing import Optional, List
 import pytz
 
