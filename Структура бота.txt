@@ -1,0 +1,240 @@
+# Архитектура Telegram бота PlanMeBot
+
+## Обзор
+PlanMeBot - это многоязычный Telegram бот для создания и управления напоминаниями с интеграцией погоды и качества воздуха. Бот поддерживает повторяющиеся задачи и работает с часовыми поясами.
+
+## Основные компоненты
+
+### 1. Основные файлы
+
+#### main.py
+- **Назначение**: Основной файл бота с хендлерами и бизнес-логикой
+- **Ключевые функции**:
+  - `cmd_start()` - обработка команды /start
+  - `cmd_list()` - отображение активных задач (/list)
+  - `show_my_tasks()` - универсальная функция показа задач
+  - `create_reminder_from_fsm()` - создание напоминания из FSM
+  - `fetch_weather_data()` - получение погоды и tz_offset
+  - `send_scheduled_reminder()` - отправка запланированных напоминаний
+  - Локальный парсинг recurrence через RegEx
+
+#### models.py
+- **Назначение**: SQLAlchemy модели базы данных
+- **Модели**:
+  - `User` - пользователи (id, lang, created_at)
+  - `Reminder` - напоминания (id, user_id, task_text, remind_at, city, is_completed, recurrence)
+
+#### database.py
+- **Назначение**: Репозитории для работы с базой данных
+- **Классы**:
+  - `UserRepository` - операции с пользователями
+  - `ReminderRepository` - операции с напоминаниями
+- **Ключевые методы**:
+  - `get_active_by_user()` - активные задачи пользователя
+  - `create()` - создание напоминания с recurrence
+  - `delete()` - удаление задачи
+  - `mark_completed()` - отметка о выполнении
+
+#### messages.py
+- **Назначение**: Мультиязычные сообщения бота
+- **Поддерживаемые языки**: Русский, English, Italiano
+- **Секции**: Основные сообщения, кнопки, ошибки
+
+#### nlp_engine.py
+- **Назначение**: Обработка естественного языка через Gemini AI
+- **Функции**:
+  - `parse_task()` - извлечение даты, времени, города, recurrence
+  - Поддержка rate limiting и fallback на локальный парсинг
+
+### 2. Поддерживающие файлы
+
+#### logger_config.py
+- Настройка логирования для разных компонентов
+- Логгеры: основной, API запросов, действий пользователя
+
+#### database_middleware.py
+- Middleware для передачи сессии БД в хендлеры
+- Автоматическое управление AsyncSession
+
+#### api_logger.py
+- Логирование API запросов к погодному сервису
+- Отслеживание response time и ошибок
+
+#### migrate.py
+- Миграции базы данных
+- Пример: добавление колонки recurrence
+
+## Архитектурные паттерны
+
+### 1. FSM (Finite State Machine)
+- **Состояния**:
+  - `waiting_for_note` - ввод текста задачи
+  - `waiting_for_date` - выбор даты
+  - `waiting_for_time` - ввод времени
+  - `waiting_for_city` - ввод города
+  - `waiting_for_recurrence` - выбор типа повторения
+
+### 2. Двойной парсинг
+- **Основной**: Gemini AI для NLP
+- **Fallback**: Локальный RegEx для recurrence при rate limits
+- **Ключевые слова**: "каждый день", "ежедневно", "weekdays", etc.
+
+### 3. Работа с часовыми поясами
+- **Источник**: OpenWeatherMap API (timezone offset)
+- **Логика**: UTC + tz_offset = локальное время
+- **Хранение**: Время в UTC в БД, конвертация при отображении
+
+### 4. Планировщик задач
+- **Движок**: APScheduler с SQLAlchemyJobStore
+- **База**: scheduler.db для персистентности
+- **Триггеры**:
+  - `date` - одноразовые задачи
+  - `interval` - ежедневные/еженедельные
+  - `cron` - по будням (mon-fri)
+
+## Потоки данных
+
+### 1. Создание задачи (NLP путь)
+```
+Пользователь → Gemini AI → Извлечение данных → БД → APScheduler
+```
+
+### 2. Создание задачи (FSM путь)
+```
+Пользователь → FSM состояния → Локальный парсинг → БД → APScheduler
+```
+
+### 3. Отправка напоминания
+```
+APScheduler → send_scheduled_reminder → Weather API → Пользователь
+```
+
+### 4. Управление задачами
+```
+Пользователь → /list → show_my_tasks → БД → Отображение с кнопками
+Пользователь → ❌ → callback → scheduler.remove_job → БД
+```
+
+## База данных
+
+### Таблица reminders
+```sql
+CREATE TABLE reminders (
+    id INTEGER PRIMARY KEY,
+    user_id INTEGER NOT NULL,
+    task_text TEXT NOT NULL,
+    remind_at DATETIME NOT NULL,  -- UTC
+    city TEXT,
+    is_completed BOOLEAN DEFAULT FALSE,
+    recurrence TEXT,  -- NULL/daily/weekdays/weekly
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+);
+```
+
+### Таблица users
+```sql
+CREATE TABLE users (
+    id INTEGER PRIMARY KEY,
+    lang TEXT DEFAULT 'en',
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+);
+```
+
+## API интеграции
+
+### OpenWeatherMap API
+- **Эндпоинты**:
+  - Геокодинг: `/geo/1.0/direct`
+  - Погода: `/data/2.5/weather`
+  - Качество воздуха: `/data/2.5/air_pollution`
+- **Данные**: temperature, description, AQI, timezone offset
+
+### Gemini AI API
+- **Модель**: gemini-2.0-flash
+- **Промпт**: Извлечение даты, времени, города, recurrence
+- **Rate limiting**: Обработка с fallback на RegEx
+
+## Безопасность и надежность
+
+### 1. Токены
+- Хранение в .env файле
+- BOT_TOKEN, WEATHER_API_KEY
+
+### 2. Обработка ошибок
+- Try-catch блоки во всех критических местах
+- Логирование ошибок
+- Graceful degradation при недоступности API
+
+### 3. Валидация данных
+- Проверка форматов времени (HH:MM)
+- Валидация городов через Weather API
+- Проверка recurrence значений
+
+## Масштабирование
+
+### 1. База данных
+- SQLite для прототипа
+- Легкая миграция на PostgreSQL для продакшена
+
+### 2. Кэширование
+- Weather API ответы можно кэшировать
+- Gemini результаты для повторяющихся запросов
+
+### 3. Микросервисы
+- Выделение NLP в отдельный сервис
+- Балансировка нагрузки для планировщика
+
+## Текущий функционал
+
+### ✅ Реализовано
+- Мультиязычность (RU/EN/IT)
+- NLP обработка через Gemini
+- FSM для ручного ввода
+- Повторяющиеся задачи (daily/weekdays/weekly)
+- Часовые пояса
+- Интеграция погоды и AQI
+- Удаление и выполнение задач
+- Persistent storage для APScheduler
+- Локальный RegEx парсинг
+
+### 🔄 В разработке
+- Команда /list и кнопка "Мои задачи"
+- Улучшенный UI для списка задач
+
+### 📋 Планируется
+- Редактирование задач
+- Категории задач
+- Экспорт/импорт задач
+- Web интерфейс управления
+
+## Запуск и развертывание
+
+### Локальный запуск
+```bash
+python -m venv venv
+source venv/bin/activate  # Windows: venv\Scripts\activate
+pip install -r requirements.txt
+python main.py
+```
+
+### Переменные окружения
+```env
+BOT_TOKEN=your_telegram_bot_token
+WEATHER_API_KEY=your_openweather_api_key
+```
+
+## Логирование
+
+### Уровни логов
+- **INFO**: Основные операции
+- **ERROR**: Проблемы и исключения
+- **DEBUG**: Детальная отладка
+
+### Файлы логов
+- `planme_bot_YYYYMMDD.log` - основной лог
+- `api_requests_YYYYMMDD.log` - API запросы
+- `user_actions_YYYYMMDD.log` - действия пользователей
+
+## Заключение
+
+Архитектура бота построена с учетом масштабирования и надежности. Используются современные практики: FSM для UX, двойной парсинг для отказоустойчивости, persistent storage для планировщика. Модульная структура позволяет легко добавлять новый функционал.
