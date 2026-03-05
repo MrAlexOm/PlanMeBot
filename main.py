@@ -688,6 +688,10 @@ async def select_lang(callback: types.CallbackQuery, state: FSMContext):
             
             # Умный онбординг - проверяем настройки
             if not user_city or user_city in ['UTC', '']:
+                # Устанавливаем состояние для ожидания города
+                await state.set_state(TaskStates.waiting_for_city)
+                await state.update_data(lang=lang)
+                
                 # Запрашиваем город для точной работы
                 onboarding_messages = {
                     'ru': "👋 Добро пожаловать! Для точной работы напоминаний и погоды, пожалуйста, укажите свой город (напишите его название).",
@@ -699,9 +703,9 @@ async def select_lang(callback: types.CallbackQuery, state: FSMContext):
                 
                 # Показываем примеры городов
                 city_examples = {
-                    'ru': "Например: /setcity Тбилиси или /setcity Москва",
-                    'en': "For example: /setcity Tbilisi or /setcity Moscow", 
-                    'it': "Per esempio: /setcity Tbilisi o /setcity Mosca"
+                    'ru': "Например: Тбилиси, Москва, Анталья, Батуми",
+                    'en': "For example: Tbilisi, Moscow, Antalya, Batumi", 
+                    'it': "Per esempio: Tbilisi, Mosca, Antalya, Batumi"
                 }
                 
                 await callback.message.answer(city_examples.get(lang, city_examples['ru']))
@@ -2081,12 +2085,35 @@ async def process_city(message: types.Message, state: FSMContext, **data):
         # Пытаемся получить timezone для города
         # Простая маппинг для популярных городов
         city_timezone_map = {
+            # Russian cities
             'москва': 'Europe/Moscow',
             'moscow': 'Europe/Moscow',
             'санкт-петербург': 'Europe/Moscow',
             'saint petersburg': 'Europe/Moscow',
+            'киев': 'Europe/Kyiv',
+            'kyiv': 'Europe/Kyiv',
+            'минск': 'Europe/Minsk',
+            'minsk': 'Europe/Minsk',
+            'алматы': 'Asia/Almaty',
+            'almaty': 'Asia/Almaty',
+            
+            # Georgian cities
             'тбилиси': 'Asia/Tbilisi',
             'tbilisi': 'Asia/Tbilisi',
+            'батуми': 'Asia/Tbilisi',
+            'batumi': 'Asia/Tbilisi',
+            
+            # Turkish cities
+            'анталья': 'Europe/Istanbul',
+            'antalya': 'Europe/Istanbul',
+            'стамбул': 'Europe/Istanbul',
+            'istanbul': 'Europe/Istanbul',
+            'измир': 'Europe/Istanbul',
+            'izmir': 'Europe/Istanbul',
+            'анкара': 'Europe/Istanbul',
+            'ankara': 'Europe/Istanbul',
+            
+            # European cities
             'нью-йорк': 'America/New_York',
             'new york': 'America/New_York',
             'лондон': 'Europe/London',
@@ -2095,12 +2122,12 @@ async def process_city(message: types.Message, state: FSMContext, **data):
             'paris': 'Europe/Paris',
             'берлин': 'Europe/Berlin',
             'berlin': 'Europe/Berlin',
-            'киев': 'Europe/Kyiv',
-            'kyiv': 'Europe/Kyiv',
-            'минск': 'Europe/Minsk',
-            'minsk': 'Europe/Minsk',
-            'алматы': 'Asia/Almaty',
-            'almaty': 'Asia/Almaty',
+            'рим': 'Europe/Rome',
+            'rome': 'Europe/Rome',
+            'мадрид': 'Europe/Madrid',
+            'madrid': 'Europe/Madrid',
+            
+            # Asian cities
             'дубай': 'Asia/Dubai',
             'dubai': 'Asia/Dubai',
             'токио': 'Asia/Tokyo',
@@ -2140,8 +2167,20 @@ async def process_city(message: types.Message, state: FSMContext, **data):
         # Сохраняем город в базу данных
         await UserRepository.set_city(session, user_id, city_name)
         
+        # Показываем главное меню после успешной установки города
+        kb = ReplyKeyboardMarkup(
+            keyboard=[
+                [KeyboardButton(text=MESSAGES.get(lang, MESSAGES['ru']).get('btn_task', '📅 Tasks')), 
+                 KeyboardButton(text=MESSAGES.get(lang, MESSAGES['ru']).get('btn_my_tasks', '🗂 My Tasks'))],
+                [KeyboardButton(text=MESSAGES.get(lang, MESSAGES['ru']).get('btn_horoscope', '🔮 Horoscope'))]
+            ], 
+            resize_keyboard=True
+        )
+        
+        welcome_msg = MESSAGES.get(lang, MESSAGES['ru']).get('main_menu', '🏠 Main menu. What\'s next?')
+        await message.answer(welcome_msg, reply_markup=kb)
+        
         await state.clear()
-        # City is already set above, no need for duplicate message
         
     except Exception as e:
         logger.error(f"Error setting city: {e}", exc_info=True)

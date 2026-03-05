@@ -1,5 +1,11 @@
-TOKEN = "8465020533:AAGulNiI2bL_v0xlAAxpqhRfIXVaTsKWP1Y" # Не забудь вставить сюда токен от BotFather
-WEATHER_KEY = "35e352d2f970db63c4d5d7fe630e869c"
+import os
+from dotenv import load_dotenv
+
+# Load environment variables
+load_dotenv()
+
+TOKEN = os.getenv("BOT_TOKEN")
+WEATHER_KEY = os.getenv("WEATHER_API_KEY")
 
 LOCALES = {
     'ru': {
