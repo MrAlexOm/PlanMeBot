@@ -329,7 +329,7 @@ async def generate_horoscope(zodiac_sign: str, birth_date: str, city: str, lang:
                 {"role": "user", "content": prompt}
             ],
             temperature=0.7,
-            max_tokens=500  # Increased from 200 to 500 for complete horoscope text
+            max_tokens=800  # Increased to 800 for even more complete horoscope text
         )
         
         horoscope_text = response.choices[0].message.content.strip()

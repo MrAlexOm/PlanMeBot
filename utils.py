@@ -8,6 +8,12 @@ def get_zodiac_sign(date_str: str) -> str:
     try:
         day, month, _ = map(int, date_str.split('.'))
         print(f"DEBUG ZODIAC: Input '{date_str}' → Day: {day}, Month: {month}")
+        
+        # Verify DD.MM format by checking reasonable ranges
+        if not (1 <= day <= 31 and 1 <= month <= 12):
+            print(f"DEBUG ZODIAC: Invalid date - Day: {day}, Month: {month}")
+            return "Неизвестно"
+            
     except (ValueError, IndexError):
         print(f"DEBUG ZODIAC: Failed to parse '{date_str}'")
         return "Неизвестно"

@@ -1126,6 +1126,9 @@ async def generate_personalized_horoscope(message: types.Message, session, user_
         
         await message.answer(next_action_msg.get(lang, next_action_msg['ru']), reply_markup=kb)
         
+        # Очищаем состояние FSM
+        await state.clear()
+        
         logger.info(f"Horoscope generated for user {user_id} in {lang} with zodiac {zodiac_sign}")
         
     except Exception as horoscope_error:
@@ -1180,6 +1183,7 @@ async def process_birthdate(message: types.Message, state: FSMContext, **data):
     # Проверяем, что дата реальная
     try:
         parsed_date = datetime.strptime(birth_date_input, '%d.%m.%Y')
+        logger.info(f"DEBUG BIRTHDATE: Input '{birth_date_input}' → Parsed as {parsed_date.strftime('%d.%m.%Y')}")
         
         # Дополнительная проверка: дата не в будущем и не слишком старая
         today = datetime.now()
