@@ -1067,13 +1067,13 @@ async def handle_horoscope(message: types.Message, state: FSMContext, **data):
             return
         
         # Генерируем гороскоп
-        await generate_personalized_horoscope(message, session, user_id, lang, birth_date)
+        await generate_personalized_horoscope(message, session, user_id, lang, birth_date, state)
         
     except Exception as e:
         logger.error(f"Horoscope handler error: {e}")
         await message.answer(MESSAGES.get(lang, MESSAGES['ru']).get('horoscope_error', 'The stars are silent today... Try again later.'))
 
-async def generate_personalized_horoscope(message: types.Message, session, user_id: int, lang: str, birth_date: str):
+async def generate_personalized_horoscope(message: types.Message, session, user_id: int, lang: str, birth_date: str, state: FSMContext):
     """Генерирует персонализированный гороскоп"""
     from datetime import date
     from utils import get_zodiac_sign, get_zodiac_sign_en, get_zodiac_sign_it
@@ -1206,7 +1206,7 @@ async def process_birthdate(message: types.Message, state: FSMContext, **data):
         logger.info(f"Birth date saved for user {user_id}: {birth_date_input}")
         
         # Генерируем гороскоп
-        await generate_personalized_horoscope(message, session, user_id, lang, birth_date_input)
+        await generate_personalized_horoscope(message, session, user_id, lang, birth_date_input, state)
         
         # Очищаем состояние
         await state.clear()
