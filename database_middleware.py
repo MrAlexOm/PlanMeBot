@@ -30,8 +30,8 @@ class DatabaseMiddleware(BaseMiddleware):
         async with self.session_pool() as session:
             try:
                 # Добавляем сессию в данные хендлера
-                data["db_session"] = session
-                logger.debug(f"Database session created for event: {type(event).__name__}")
+                data["session"] = session
+                logger.info(f"=== DatabaseMiddleware: сессия создана и передана в хендлер ===")
                 
                 # Выполняем хендлер с сессией БД
                 result = await handler(event, data)
@@ -61,7 +61,7 @@ def with_db_session(func):
     Упрощает доступ к сессии в хендлерах
     """
     async def wrapper(event, data, *args, **kwargs):
-        session = data.get("db_session")
+        session = data.get("session")
         if not session:
             raise ValueError("No database session found in middleware data")
         

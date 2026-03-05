@@ -1,4 +1,4 @@
-from sqlalchemy import Column, Integer, BigInteger, String, Text, Boolean, DateTime, ForeignKey
+from sqlalchemy import Column, Integer, BigInteger, String, Text, Boolean, DateTime, ForeignKey, Date
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import relationship
 from datetime import datetime
@@ -10,7 +10,10 @@ class User(Base):
     
     id = Column(BigInteger, primary_key=True)  # Telegram user_id
     lang = Column(String(2), default='en')      # ru, en, it
+    city = Column(String(100), default='UTC')    # User's default city for timezone
     timezone = Column(String(50), default='UTC') # для будущих фич
+    birth_date = Column(String(10), nullable=True)  # Birth date in DD.MM.YYYY format
+    last_horoscope_date = Column(Date, nullable=True)  # Last date user got horoscope
     created_at = Column(DateTime, default=datetime.utcnow)
     
     # Связь с задачами
@@ -24,6 +27,7 @@ class Reminder(Base):
     task_text = Column(Text, nullable=False)
     remind_at = Column(DateTime, nullable=False)  # UTC время
     city = Column(String(100))
+    recurrence = Column(String(50))  # daily, weekly, weekdays, none
     is_completed = Column(Boolean, default=False)
     created_at = Column(DateTime, default=datetime.utcnow)
     
