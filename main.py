@@ -1087,6 +1087,9 @@ async def generate_personalized_horoscope(message: types.Message, session, user_
     elif lang == 'it':
         zodiac_sign = get_zodiac_sign_it(birth_date)
     
+    # Debug logging for date parsing
+    logger.info(f"DEBUG HOROSCOPE: Birth date input: '{birth_date}' → Zodiac: '{zodiac_sign}'")
+    
     # Получаем город пользователя
     user_city = await UserRepository.get_city(session, user_id)
     city_display = user_city if user_city else 'UTC'
@@ -1104,6 +1107,24 @@ async def generate_personalized_horoscope(message: types.Message, session, user_
         # Обновляем дату последнего гороскопа
         today = date.today()
         await UserRepository.set_last_horoscope_date(session, user_id, today)
+        
+        # Показываем главное меню с вопросом "Что делаем дальше?"
+        kb = ReplyKeyboardMarkup(
+            keyboard=[
+                [KeyboardButton(text=MESSAGES.get(lang, MESSAGES['ru']).get('btn_task', '📅 Tasks')), 
+                 KeyboardButton(text=MESSAGES.get(lang, MESSAGES['ru']).get('btn_my_tasks', '🗂 My Tasks'))],
+                [KeyboardButton(text=MESSAGES.get(lang, MESSAGES['ru']).get('btn_horoscope', '🔮 Horoscope'))]
+            ], 
+            resize_keyboard=True
+        )
+        
+        next_action_msg = {
+            'ru': 'Что делаем дальше?',
+            'en': 'What\'s next?',
+            'it': 'Cosa facciamo dopo?'
+        }
+        
+        await message.answer(next_action_msg.get(lang, next_action_msg['ru']), reply_markup=kb)
         
         logger.info(f"Horoscope generated for user {user_id} in {lang} with zodiac {zodiac_sign}")
         

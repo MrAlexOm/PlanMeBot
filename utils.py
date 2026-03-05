@@ -7,7 +7,9 @@ def get_zodiac_sign(date_str: str) -> str:
     """Определяет знак зодиака по дате в формате ДД.ММ.ГГГГ"""
     try:
         day, month, _ = map(int, date_str.split('.'))
+        print(f"DEBUG ZODIAC: Input '{date_str}' → Day: {day}, Month: {month}")
     except (ValueError, IndexError):
+        print(f"DEBUG ZODIAC: Failed to parse '{date_str}'")
         return "Неизвестно"
     
     if (month == 3 and day >= 21) or (month == 4 and day <= 19): 
@@ -32,7 +34,10 @@ def get_zodiac_sign(date_str: str) -> str:
         return "Козерог"
     if (month == 1 and day >= 20) or (month == 2 and day <= 18): 
         return "Водолей"
-    return "Рыбы"
+    
+    result = "Рыбы"
+    print(f"DEBUG ZODIAC: Final result for Day {day}, Month {month}: {result}")
+    return result
 
 def get_zodiac_sign_en(date_str: str) -> str:
     """Determines zodiac sign by date in format DD.MM.YYYY"""
