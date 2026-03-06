@@ -41,6 +41,9 @@ from logger_config import setup_logging
 from api_logger import api_logger, bot_logger, log_execution_time
 from nlp_engine import parse_task
 
+# Регистрация middleware для БД
+from database_middleware import DatabaseMiddleware
+
 class TaskStates(StatesGroup):
     waiting_for_note = State()
     waiting_for_date = State()
