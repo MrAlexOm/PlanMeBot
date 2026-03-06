@@ -38,7 +38,6 @@ from sqlalchemy.ext.asyncio import AsyncSession
 # Импорты для сообщений, логирования и middleware
 from messages import MESSAGES, LANGUAGE_NAMES
 from logger_config import setup_logging
-from database_middleware import create_database_middleware
 from api_logger import api_logger, bot_logger, log_execution_time
 from nlp_engine import parse_task
 
@@ -46,6 +45,49 @@ from nlp_engine import parse_task
 # Загрузка токенов из .env файла (НИКОГДА не храните токены в коде!)
 API_TOKEN = os.getenv("BOT_TOKEN")
 WEATHER_API_KEY = os.getenv("WEATHER_API_KEY")
+
+# --- СЛОВАРЬ GIF-ДЛЯ ВАЙБА ---
+VIBE_GIFS = {
+    'success': 'https://media.giphy.com/media/v1.YXilKnWq6B2F6uT9/giphy.gif',
+    'love': 'https://media.giphy.com/media/v1.YXx076EYp9q2/giphy.gif',
+    'energy': 'https://media.giphy.com/media/v1.YXx0bEJl3g2/giphy.gif',
+    'harmony': 'https://media.giphy.com/media/v1.YXx0cQl3g3/giphy.gif',
+    'magic': 'https://media.giphy.com/media/v1.YXx0dFJl4g4/giphy.gif',
+    'luck': 'https://media.giphy.com/media/v1.YXx0aHJl5g5/giphy.gif',
+    'joy': 'https://media.giphy.com/media/v1.YXx0fKJl6g6/giphy.gif',
+    'peace': 'https://media.giphy.com/media/v1.YXx0gLJl7g7/giphy.gif',
+    'power': 'https://media.giphy.com/media/v1.YXx0hJl8g8/giphy.gif'
+}
+
+async def send_vibe_gif(message: types.Message, vibe: str, lang: str):
+    """Отправляет GIF соответствующую вайбу дня"""
+    try:
+        # Ищем подходящий GIF
+        gif_url = VIBE_GIFS.get(vibe.lower())
+        
+        if not gif_url:
+            # Если GIF не найден, отправляем стандартный
+            gif_url = VIBE_GIFS['success']
+        
+        # Локализованные сообщения
+        gif_messages = {
+            'ru': f'🎬 Твой вайб сегодня: {vibe.upper()}',
+            'en': f'🎬 Your vibe today: {vibe.upper()}',
+            'it': f'🎬 La tua vibrazione oggi: {vibe.upper()}'
+        }
+        
+        # Отправляем GIF как анимированный документ
+        await message.answer_animation(
+            gif_url,
+            caption=gif_messages.get(lang, gif_messages['ru'])
+        )
+        
+        logger.info(f"Sent GIF for vibe '{vibe}' to user {message.from_user.id}")
+        
+    except Exception as e:
+        logger.error(f"Error sending GIF: {e}")
+        # Если GIF не отправился, продолжаем без ошибки
+        pass
 
 # Проверка наличия токенов
 if not API_TOKEN:
@@ -1101,8 +1143,22 @@ async def generate_personalized_horoscope(message: types.Message, session, user_
         # Добавляем знак зодиака к сообщению
         horoscope_message = f"✨ Ваш гороскоп на сегодня ({zodiac_sign}):\n\n{horoscope_text}"
         
+        # Обрабатываем GIF-логику: ищем разделитель ||| в тексте
+        gif_keyword = None
+        if "|||" in horoscope_text:
+            # Извлекаем ключевое слово после разделителя
+            parts = horoscope_text.split("|||")
+            if len(parts) > 1:
+                gif_keyword = parts[-1].strip().lower()
+                # Убираем ключевое слово из основного текста
+                horoscope_message = f"✨ Ваш гороскоп на сегодня ({zodiac_sign}):\n\n{parts[0].strip()}"
+        
         # Отправляем гороскоп пользователю
         await message.answer(horoscope_message, parse_mode="HTML")
+        
+        # Если есть GIF-ключевое слово, отправляем GIF
+        if gif_keyword:
+            await send_vibe_gif(message, gif_keyword, lang)
         
         # Обновляем дату последнего гороскопа
         today = date.today()
