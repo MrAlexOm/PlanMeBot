@@ -108,5 +108,14 @@ if not WEATHER_API_KEY:
 logger = setup_logging()
 
 # Создание бота и диспетчера (ТОЛЬКО ОДИН РАЗ!)
+logger.info("Creating bot and dispatcher...")
 bot = Bot(token=API_TOKEN)
+logger.info("Bot created successfully")
+
 dp = Dispatcher(storage=MemoryStorage())
+logger.info("Dispatcher created successfully")
+
+# Регистрация middleware для БД
+logger.info("Registering database middleware...")
+dp.update.middleware(DatabaseMiddleware(AsyncSessionLocal))
+logger.info("Database middleware registered successfully")
