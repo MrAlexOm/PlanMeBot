@@ -45,7 +45,6 @@ from nlp_engine import parse_task
 from database_middleware import DatabaseMiddleware
 dp.update.middleware(DatabaseMiddleware(AsyncSessionLocal))
 
-# --- СОСТОЯНИЯ (FSM) ---
 class TaskStates(StatesGroup):
     waiting_for_note = State()
     waiting_for_date = State()
@@ -102,6 +101,7 @@ async def send_vibe_gif(message: types.Message, vibe: str, lang: str):
         # Если GIF не отправился, продолжаем без ошибки
         pass
 
+# Проверка наличия токенов
 # Проверка наличия токенов
 if not API_TOKEN:
     raise ValueError("BOT_TOKEN не найден! Создайте .env файл с вашим токеном.")
