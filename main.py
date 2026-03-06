@@ -119,3 +119,53 @@ logger.info("Dispatcher created successfully")
 logger.info("Registering database middleware...")
 dp.update.middleware(DatabaseMiddleware(AsyncSessionLocal))
 logger.info("Database middleware registered successfully")
+
+# --- ЗАПУСК БОТА ---
+async def main():
+    """Основная функция запуска бота"""
+    try:
+        logger.info("Starting PlanMeBOT...")
+        
+        # Сброс вебхука для избежания конфликтов
+        logger.info("Dropping pending webhook updates...")
+        await bot.delete_webhook(drop_pending_updates=True)
+        logger.info("Webhook cleanup completed")
+        
+        # Инициализация БД
+        logger.info("Initializing database...")
+        await init_db()
+        logger.info("Database initialized successfully")
+        
+        # Инициализация планировщика
+        logger.info("Initializing scheduler...")
+        scheduler = AsyncIOScheduler()
+        scheduler.configure(
+            jobstores={
+                'default': SQLAlchemyJobStore(url='sqlite:///jobs.sqlite')
+            },
+            timezone='UTC',
+            job_defaults={
+                'coalesce': False,
+                'max_instances': 3
+            }
+        )
+        logger.info("Scheduler initialized successfully")
+        
+        # Запуск планировщика
+        logger.info("Starting scheduler...")
+        scheduler.start()
+        logger.info("Scheduler started successfully")
+        
+        # Запуск бота
+        logger.info("Starting bot polling...")
+        await dp.start_polling(
+            drop_pending_updates=True,
+            allowed_updates=types.Update.MESSAGE | types.Update.CALLBACK_QUERY
+        )
+        
+    except Exception as e:
+        logger.error(f"Fatal error in main: {e}")
+        raise
+
+if __name__ == "__main__":
+    asyncio.run(main())
